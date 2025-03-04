@@ -16,8 +16,10 @@ version = "0.1.0"
 
 [dependencies]
 base64ct = "1"
+bitflag = "0.10"
 blake2 = "0.10"
 crypto-bigint = { version = "0.6", features = ["hybrid-array"] }
+derive_more = { version = "2.0", features = ["debug", "display", "from", "from_str", "into", "try_from", "try_into", "try_unwrap", "unwrap"] }
 num = "0.4"
 rand = { version = "0.9", features = ["thread_rng"] }
 rand_distr = "0.5"
