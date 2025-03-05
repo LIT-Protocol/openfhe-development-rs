@@ -7,6 +7,8 @@ use derive_more::{Display, FromStr, TryFrom};
 pub const MAX_BITS_IN_WORD: usize = 61;
 /// The maximum log step
 pub const MAX_LOG_STEP: usize = 60;
+/// The maximum levels for discrete gaussian sampling
+pub const MAX_DISCRETE_GAUSSIAN_LEVELS: usize = 4;
 /// Most common value for levels/towers to drop
 pub const BASE_NUM_LEVELS_TO_DROP: usize = 1;
 /// Noise Flooding distribution parameter for distributed decryption in threshold FHE
@@ -294,3 +296,56 @@ pub enum CompressionLevel {
 
 hex_enum_usize!(CompressionLevel);
 try_serde_str_or_u8!(CompressionLevel);
+
+/// RLWE key generation modes
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr, TryFrom,
+)]
+#[try_from(repr)]
+#[repr(usize)]
+pub enum SecretKeyDistribution {
+    /// Gaussian
+    Gaussian = 0,
+    /// Uniform Ternary
+    #[default]
+    UniformTernary = 1,
+    /// Sparse Ternary
+    SparseTernary = 2,
+}
+
+hex_enum_usize!(SecretKeyDistribution);
+try_serde_str_or_u8!(SecretKeyDistribution);
+
+/// The polynomial ring format representation
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr, TryFrom,
+)]
+#[try_from(repr)]
+#[repr(usize)]
+pub enum PolynomialRingFormat {
+    /// Evaluation
+    #[default]
+    Evaluation = 0,
+    /// Coefficient
+    Coefficient = 1,
+}
+
+hex_enum_usize!(PolynomialRingFormat);
+try_serde_str_or_u8!(PolynomialRingFormat);
+
+/// The Base Type for the Discrete Gaussian Sampler
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr, TryFrom,
+)]
+#[try_from(repr)]
+#[repr(usize)]
+pub enum BaseSamplerType {
+    /// Knuth-Yao
+    KnuthYao = 0,
+    #[default]
+    /// Peikert
+    Peikert,
+}
+
+hex_enum_usize!(BaseSamplerType);
+try_serde_str_or_u8!(BaseSamplerType);

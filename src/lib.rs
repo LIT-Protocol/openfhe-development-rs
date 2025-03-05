@@ -19,7 +19,7 @@
 mod macros;
 
 pub mod constants;
-// mod core;
 pub mod context;
+mod core;
 pub mod encoding;
 pub mod error;
