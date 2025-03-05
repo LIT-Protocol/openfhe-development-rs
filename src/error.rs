@@ -11,6 +11,9 @@ pub enum Error {
     /// Error when the library is unable to derive a value from a repr
     #[error("Derive More Try From Repr error: `{0}`")]
     DeriveMoreTryFromRepr(String),
+    /// Error when creating a Dcrt element params
+    #[error("Incorrect parameters set for the DCRT element.")]
+    DcrtElementParamsMismatch,
 }
 
 impl<T> From<std::sync::PoisonError<T>> for Error {

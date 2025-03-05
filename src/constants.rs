@@ -19,6 +19,8 @@ pub const PRE_SD: usize = 1048576;
 pub const NUM_MODULI_MULTIPARTY: usize = 2;
 /// Modulus size for additional moduli in NOISE_FLOODING_MULTIPARTY mode
 pub const MULTIPARTY_MOD_SIZE: usize = 60;
+/// The maximum number of bits in modulus
+pub const MAX_MODULUS_SIZE: usize = 60;
 
 /// All features supported by public key encryption schemes
 #[bitflag(usize)]

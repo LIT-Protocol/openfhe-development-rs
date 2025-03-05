@@ -1,3 +1,3 @@
-mod lattice;
-mod math;
-mod utils;
+pub mod lattice;
+pub mod math;
+pub mod utils;
