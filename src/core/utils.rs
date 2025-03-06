@@ -120,6 +120,28 @@ pub fn get_coprimes(n: u64) -> Vec<u64> {
     coprimes
 }
 
+pub fn mod_add_eq(a: u64, b: u64, modulus: u64) -> u64 {
+    // First reduce inputs modulo modulus
+    let a = a % modulus;
+    let b = b % modulus;
+
+    // Calculate sum
+    let sum = a.wrapping_add(b);
+
+    // Branchless modular reduction
+    sum.wrapping_sub(modulus & ((sum < modulus) as u64).wrapping_sub(1))
+}
+
+pub fn mod_sub_eq(a: u64, b: u64, modulus: u64) -> u64 {
+    // Ensure inputs are reduced
+    let a = a % modulus;
+    let b = b % modulus;
+
+    // Add modulus to ensure result is positive, then take modulus
+    let diff = a.wrapping_sub(b).wrapping_add(modulus);
+    diff % modulus
+}
+
 pub fn mod_mul_eq(a: u64, b: u64, modulus: u64, mu: u128) -> u64 {
     let result = mul_128(a, b);
     barrett_reduction(result, modulus, mu)
@@ -266,4 +288,17 @@ pub fn miller_rabin(candidate: u64) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modadd() {
+        assert_eq!(mod_add_eq(10, 8, 17), 1);
+        assert_eq!(mod_add_eq(200, 60, 251), 9);
+        assert_eq!(mod_add_eq(255, 100, 251), 104);
+        assert_eq!(mod_add_eq(u64::MAX - 10, u64::MAX - 50, 257), 197);
+    }
 }

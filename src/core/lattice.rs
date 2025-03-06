@@ -9,6 +9,8 @@ use std::{
 
 pub mod element;
 pub mod hal;
+mod params;
+mod poly;
 
 /// General number type
 pub trait IntType:
