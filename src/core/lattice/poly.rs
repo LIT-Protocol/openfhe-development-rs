@@ -248,6 +248,13 @@ impl Poly {
         &self.values
     }
 
+    pub fn set_values(&mut self, values: &[u64]) {
+        let m = self.params.ciphertext_modulus.get().to_primitive();
+        for (v, &val) in self.values.iter_mut().zip(values) {
+            *v = U64::from_u64(val % m);
+        }
+    }
+
     pub fn cyclotomic_order(&self) -> &U64 {
         &self.params.cyclotomic_order
     }

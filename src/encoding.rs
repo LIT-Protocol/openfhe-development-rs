@@ -1,5 +1,10 @@
 //! Encoding parameters and plaintext polynomial types
 
+mod plaintext;
+
+pub use plaintext::*;
+
+use crypto_bigint::{Odd, U64};
 use derive_more::{Display, FromStr, TryFrom};
 use serde::{Deserialize, Serialize};
 
@@ -31,15 +36,15 @@ pub struct Params {
     /// maximum batch size used by EvalSumKeyGen for packed encoding
     pub batch_size: usize,
     /// plaintext generator is used for packed encoding (to find the correct automorphism index)
-    pub plaintext_generator: usize,
+    pub plaintext_generator: U64,
     /// plaintext modulus that is used by all schemes
-    pub plaintext_modulus: u64,
+    pub plaintext_modulus: Odd<U64>,
     /// root of unity for plaintext modulus
-    pub plaintext_root_of_unity: u128,
+    pub plaintext_root_of_unity: U64,
     /// big plaintext modulus that is used for arbitrary cyclotomics
-    pub plaintext_big_modulus: u128,
+    pub plaintext_big_modulus: Odd<U64>,
     /// root of unity for big plaintext modulus
-    pub plaintext_big_root_of_unity: u128,
+    pub plaintext_big_root_of_unity: U64,
 }
 
 /// Plaintext Polynomial Type
