@@ -1,163 +1,100 @@
-use subtle::{Choice, ConditionallySelectable};
-
-/// Barrett reduction of 128-bit integer modulo 64-bit integer
-///
-/// a: operand (128-bit)
-/// modulus: modulus (64-bit)
-/// mu: 2^128/modulus (128-bit)
-/// result: 64-bit integer a mod m
-pub const fn barrett_reduction(a: u128, modulus: u64, mu: u128) -> u64 {
-    let a_lo: u64 = a as u64;
-    let a_hi: u64 = (a >> 64) as u64;
-    let mu_lo: u64 = mu as u64;
-    let mu_hi: u64 = (mu >> 64) as u64;
-
-    let left_hi = mul_128_get_high(a_lo, mu_lo);
-
-    let middle = mul_128(a_lo, mu_hi);
-    let middle_lo = middle as u64;
-    let middle_hi = (middle >> 64) as u64;
-
-    let (tmp1, carry) = middle_lo.overflowing_add(left_hi);
-    let tmp2 = middle_hi + (carry as u64);
-
-    let middle = mul_128(a_hi, mu_lo);
-    let middle_lo = middle as u64;
-    let middle_hi = (middle >> 64) as u64;
-
-    let carry = middle_lo.checked_add(tmp1).is_none();
-    let left_hi = middle_hi + (carry as u64);
-
-    let tmp1 = a_hi
-        .wrapping_mul(mu_hi)
-        .wrapping_add(tmp2)
-        .wrapping_add(left_hi);
-
-    let mut result = a_lo.wrapping_sub(tmp1.wrapping_mul(modulus));
-
-    while result >= modulus {
-        result = result.wrapping_sub(modulus);
-    }
-
-    result
-}
-
-// Helper function to compute the full 128-bit product of two 64-bit numbers
-#[inline]
-pub const fn mul_128(a: u64, b: u64) -> u128 {
-    (a as u128) * (b as u128)
-}
-
-// Helper function to get only the high 64 bits of a 128-bit product
-#[inline]
-pub const fn mul_128_get_high(a: u64, b: u64) -> u64 {
-    (((a as u128) * (b as u128)) >> 64) as u64
-}
+use crate::ActingPrimitive;
+use crypto_bigint::{
+    Monty, NonZero, Odd, RandomMod, U64, modular::MontyForm, rand_core::SeedableRng,
+};
 
 /// Compute phi of `n` which is the number of integers `m` coprime to `n` such that `1 <= m < n`
-pub fn get_totient(n: usize) -> usize {
-    let n = n as u64;
-    let factors = prime_factorization::Factorization::run(n);
+pub fn get_totient(n: U64) -> U64 {
+    let n = n.to_primitive();
+    let factors = prime_factorization::Factorization::<u64>::run(n);
     let mut prime_prod = 1;
     let mut numerator = 1;
     for r in &factors.factors {
-        numerator = numerator * *r - 1;
+        numerator *= *r - 1;
         prime_prod *= *r;
     }
-    ((n / prime_prod) * numerator) as usize
+    U64::from_u64((n / prime_prod) * numerator)
 }
 
 /// `cyclotomic_order` must be a power of two
 /// `modulus` must be a prime number
-pub fn root_of_unity(cyclotomic_order: usize, modulus: usize) -> usize {
-    if !cyclotomic_order.is_power_of_two() {
+pub fn root_of_unity(cyclotomic_order: U64, modulus: Odd<U64>) -> U64 {
+    let order: u64 = cyclotomic_order.to_primitive();
+    let modu: u64 = modulus.get().to_primitive();
+    if !order.is_power_of_two() {
         panic!("`cyclotomic_order` must be a power of two");
     }
-    let m = modulus as u64;
-    let factors = prime_factorization::Factorization::run(m);
+    let factors = prime_factorization::Factorization::run(modu);
     if !factors.is_prime {
         panic!("`modulus` must be a prime number");
     }
-    if (modulus - 1) % cyclotomic_order != 0 {
+    if (modu - 1) % order == 0 {
         panic!(
             "Please provide a prime modulus(q) and a cyclotomic number(m) satisfying the condition (q-1)/m is an integer. prime modulus({}) and modulus({}) do not satisfy this condition",
-            modulus, cyclotomic_order
+            modu, order
         );
     }
 
-    let c = cyclotomic_order as u64;
-    let generator = find_generator(m);
-    let result = mod_pow(generator, (m - 1) / c, m);
-    let mu = compute_mu(m);
-    let mut x = mod_mul_eq(1, result, m, mu);
-    let co_primes = get_coprimes(c);
+    let co_primes = get_coprimes(cyclotomic_order);
+    let params = MontyForm::new_params_vartime(modulus);
+
+    let generator = find_generator(modulus);
+    let generator = MontyForm::new(&generator, params);
+    let one = MontyForm::one(params);
+    let exponent: U64 = (modulus.get() - U64::ONE) / NonZero::<U64>::new_unwrap(cyclotomic_order);
+
+    let result = generator.pow(&exponent);
+    let mut x = result;
 
     let mut min_ru = x;
-    let mut cur_pow_idx = 1;
+    let mut cur_pow_idx = 1u64;
 
     for next_pow_idx in &co_primes {
+        let next_pow_idx: u64 = next_pow_idx.to_primitive();
         let diff_pow = next_pow_idx - cur_pow_idx;
 
         for _ in 0..diff_pow {
-            x = mod_mul_eq(x, result, m, mu);
+            x = x.mul(&result);
         }
-        if x < min_ru && x != 1 {
+        let lhs = x.retrieve();
+        let rhs = min_ru.retrieve();
+        if lhs < rhs && x != one {
             min_ru = x;
         }
-        cur_pow_idx = *next_pow_idx;
+        cur_pow_idx = next_pow_idx;
     }
 
-    min_ru as usize
+    min_ru.retrieve()
 }
 
-pub fn get_coprimes(n: u64) -> Vec<u64> {
+pub fn get_coprimes(n: U64) -> Vec<U64> {
     let mut coprimes = Vec::new();
-    for i in 1..n {
-        if num::integer::gcd(i, n) == 1 {
+    let mut i = U64::ONE;
+    while i < n {
+        if i.gcd(&n) == U64::ONE {
             coprimes.push(i);
         }
+
+        i += U64::ONE;
     }
     coprimes
 }
 
-pub fn mod_add_eq(a: u64, b: u64, modulus: u64) -> u64 {
-    // First reduce inputs modulo modulus
-    let a = a % modulus;
-    let b = b % modulus;
+pub fn is_generator(generator: U64, modulus: Odd<U64>) -> bool {
+    let qm1: U64 = modulus.get() - U64::ONE;
+    let qm1_u64: u64 = qm1.to_primitive();
 
-    // Calculate sum
-    let sum = a.wrapping_add(b);
+    let params = MontyForm::<{ U64::LIMBS }>::new_params_vartime(modulus);
+    let one = MontyForm::<{ U64::LIMBS }>::one(params);
+    let generator = MontyForm::<{ U64::LIMBS }>::new(&generator, params);
 
-    // Branchless modular reduction
-    sum.wrapping_sub(modulus & ((sum < modulus) as u64).wrapping_sub(1))
-}
-
-pub fn mod_sub_eq(a: u64, b: u64, modulus: u64) -> u64 {
-    // Ensure inputs are reduced
-    let a = a % modulus;
-    let b = b % modulus;
-
-    // Add modulus to ensure result is positive, then take modulus
-    let diff = a.wrapping_sub(b).wrapping_add(modulus);
-    diff % modulus
-}
-
-pub fn mod_mul_eq(a: u64, b: u64, modulus: u64, mu: u128) -> u64 {
-    let result = mul_128(a, b);
-    barrett_reduction(result, modulus, mu)
-}
-
-pub const fn compute_mu(modulus: u64) -> u128 {
-    u128::MAX / modulus as u128 + 1
-}
-
-pub fn is_generator(generator: u64, modulus: u64) -> bool {
-    let qm1 = modulus - 1;
-    let prime_factors = prime_factorization::Factorization::run(qm1);
+    let prime_factors = prime_factorization::Factorization::run(qm1_u64);
     let mut cnt = 0;
     for r in &prime_factors.factors {
+        let r = NonZero::<U64>::new_unwrap(U64::from_u64(*r));
+        let exponent = qm1 / r;
         cnt += 1;
-        if mod_pow(generator, qm1 / *r, modulus) == 1 {
+        if generator.pow(&exponent) == one {
             break;
         }
     }
@@ -165,140 +102,43 @@ pub fn is_generator(generator: u64, modulus: u64) -> bool {
 }
 
 /// Find a generator for a given prime modulus
-pub fn find_generator(modulus: u64) -> u64 {
-    let qm2 = modulus - 2;
+pub fn find_generator(modulus: Odd<U64>) -> U64 {
+    // This function isn't cryptographically required to be secure since its just testing
+    // the generator property of the given modulus so ChaCha8Rng is ok
+    let mut rng = rand_chacha::ChaCha8Rng::from_os_rng();
+    let qm2: NonZero<U64> = NonZero::<U64>::new_unwrap(modulus.get() - U64::from_u64(2));
     loop {
-        let g = rand::random::<u64>() % qm2 + 1;
+        let g = U64::random_mod(&mut rng, &qm2) + U64::ONE;
         if is_generator(g, modulus) {
             return g;
         }
     }
 }
 
-pub fn mod_pow(base: u64, exponent: u64, modulus: u64) -> u64 {
-    if modulus == 1 {
-        return 0;
+pub fn next_prime(starting_number: U64, cyclotomic_order: U64) -> U64 {
+    let mut rng = rand_chacha::ChaCha8Rng::from_os_rng();
+    let mut n = starting_number + cyclotomic_order;
+    while !crypto_primes::is_prime_with_rng(&mut rng, &n) {
+        n += cyclotomic_order;
     }
+    n
+}
 
-    let mut result = 1;
-    let mut base = base % modulus;
-    let mut exponent = exponent;
-
-    while exponent > 0 {
-        let take = Choice::from((exponent & 1) as u8);
-        let tmp = (result * base) % modulus;
-        result.conditional_assign(&tmp, take);
-        base = (base * base) % modulus;
-        exponent >>= 1;
+pub fn previous_prime(starting_number: U64, cyclotomic_order: U64) -> U64 {
+    let mut rng = rand_chacha::ChaCha8Rng::from_os_rng();
+    let mut n = starting_number - cyclotomic_order;
+    while !crypto_primes::is_prime_with_rng(&mut rng, &n) {
+        n -= cyclotomic_order;
     }
+    n
+}
 
+pub fn reverse_bits(n: usize, bits: usize) -> usize {
+    let mut result = 0;
+    for i in 0..bits {
+        if n & (1 << i) != 0 {
+            result |= 1 << (bits - 1 - i);
+        }
+    }
     result
-}
-
-pub fn next_prime(candidate: u64) -> u64 {
-    match candidate {
-        0..=2 => 2,
-        3 => 3,
-        4 | 5 => 5,
-        _ => {
-            let k = candidate / 6;
-
-            let o = if candidate % 6 < 2 { 1 } else { 5 };
-
-            let mut x = 6 * k + o;
-            let mut i = (3 + o) / 2;
-            while !fermat(x) && !miller_rabin(x) {
-                i ^= 6;
-                x += i;
-            }
-            x
-        }
-    }
-}
-
-pub fn previous_prime(candidate: u64) -> u64 {
-    match candidate {
-        0 | 1 => 0,
-        2 => 2,
-        3 | 4 => 3,
-        _ => {
-            let mut x = if candidate & 1 == 0 {
-                candidate - 1
-            } else {
-                candidate
-            };
-
-            let (o, mut i) = if x % 6 == 5 { (5, 4) } else { (1, 2) };
-
-            x = (x / 6) * 6 + o;
-
-            while !fermat(x) && !miller_rabin(x) {
-                x -= i;
-                i ^= 6;
-            }
-            x
-        }
-    }
-}
-
-pub fn fermat(candidate: u64) -> bool {
-    let r = rand::random::<u64>() % candidate + 1;
-
-    mod_pow(r, candidate - 1, candidate) == 1
-}
-
-pub fn miller_rabin(candidate: u64) -> bool {
-    const LIMIT: usize = 12;
-    if candidate < 3 {
-        return false;
-    }
-
-    let cand_m1 = candidate - 1;
-    let mut d = cand_m1;
-    let mut trials = d.trailing_ones();
-
-    if trials > 0 {
-        d >>= trials;
-    }
-    if trials < 5 {
-        trials = 5;
-    }
-
-    let bases = (0..LIMIT)
-        .map(|_| rand::random::<u64>() % cand_m1 + 1)
-        .collect::<Vec<u64>>();
-
-    'next_base: for base in bases {
-        let mut test = mod_pow(base, d, candidate);
-
-        if test == 1 || test == cand_m1 {
-            continue;
-        }
-
-        for _ in 1..trials - 1 {
-            test = mod_pow(test, 2, candidate);
-
-            if test == 1 {
-                return false;
-            } else if test == cand_m1 {
-                break 'next_base;
-            }
-        }
-        return false;
-    }
-
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn modadd() {
-        assert_eq!(mod_add_eq(10, 8, 17), 1);
-        assert_eq!(mod_add_eq(200, 60, 251), 9);
-        assert_eq!(mod_add_eq(255, 100, 251), 104);
-        assert_eq!(mod_add_eq(u64::MAX - 10, u64::MAX - 50, 257), 197);
-    }
 }

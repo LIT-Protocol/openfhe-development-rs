@@ -23,3 +23,25 @@ pub mod context;
 mod core;
 pub mod encoding;
 pub mod error;
+mod serdes;
+
+trait ActingPrimitive {
+    type Primitive;
+    fn to_primitive(&self) -> Self::Primitive;
+}
+
+impl ActingPrimitive for crypto_bigint::U64 {
+    type Primitive = u64;
+
+    fn to_primitive(&self) -> Self::Primitive {
+        u64::from_be_bytes(self.to_be_bytes())
+    }
+}
+
+impl ActingPrimitive for crypto_bigint::U128 {
+    type Primitive = u128;
+
+    fn to_primitive(&self) -> Self::Primitive {
+        u128::from_be_bytes(self.to_be_bytes())
+    }
+}

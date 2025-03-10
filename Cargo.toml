@@ -18,12 +18,13 @@ version = "0.1.0"
 base64ct = "1"
 bitflag = "0.10"
 blake2 = "0.10"
-crypto-bigint = { version = "0.6", features = ["hybrid-array", "serde"] }
-crypto-primes = "0.6"
+crypto-bigint = { version = "0.7.0-pre.0", features = ["hybrid-array", "rand", "serde"] }
+crypto-primes = "0.7.0-pre.0"
 derive_more = { version = "2.0", features = ["debug", "display", "from", "from_str", "into", "try_from", "try_into", "try_unwrap", "unwrap"] }
 num = "0.4"
 prime_factorization = "1.0"
 rand = { version = "0.9", features = ["thread_rng"] }
+rand_chacha = "0.9"
 rand_distr = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"

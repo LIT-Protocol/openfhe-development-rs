@@ -1,5 +1,5 @@
 use crate::constants::PolynomialRingFormat;
-use crate::core::lattice::IntType;
+use crypto_bigint::{Odd, U64};
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, Mul, MulAssign, Neg, Rem, Sub, SubAssign};
 
@@ -12,17 +12,17 @@ pub trait Element:
     + Clone
     + Debug
     + PartialEq
-    + Index<usize, Output = Self::IntType>
+    + Index<usize, Output = U64>
     + Neg                      // Unary negation on a lattice
-    + Add<Self::IntType>
-    + Sub<Self::IntType>
-    + Mul<Self::IntType>
-    + Div<Self::IntType>       // Scalar division and round
-    + Rem<Self::IntType>       // Modulus operation
-    + AddAssign<Self::IntType> // Scalar addition on a lattice
-    + SubAssign<Self::IntType> // Scalar subtraction on a lattice
-    + MulAssign<Self::IntType> // Scalar multiplication on a lattice
-    + DivAssign<Self::IntType> // Scalar division and round on all entries
+    + Add<U64>
+    + Sub<U64>
+    + Mul<U64>
+    + Div<U64>       // Scalar division and round
+    + Rem<U64>       // Modulus operation
+    + AddAssign<U64> // Scalar addition on a lattice
+    + SubAssign<U64> // Scalar subtraction on a lattice
+    + MulAssign<U64> // Scalar multiplication on a lattice
+    + DivAssign<U64> // Scalar division and round on all entries
     + Add                      // Addition of two lattices
     + Sub                      // Subtraction of two lattices
     + Mul                      // Multiplication on a lattice
@@ -36,9 +36,6 @@ pub trait Element:
     + for<'a> SubAssign<&'a Self>
     + for<'a> MulAssign<&'a Self>
 {
-    /// The number type
-    type IntType: IntType;
-
     /// Clone a new empty element
     fn clone_empty(&self) -> Self;
 
@@ -55,13 +52,13 @@ pub trait Element:
     fn len(&self) -> usize;
 
     /// Get the modulus of the element
-    fn modulus(&self) -> Self::IntType;
+    fn modulus(&self) -> Odd<U64>;
 
     /// Get the values of the element
-    fn values(&self) -> &[Self::IntType];
+    fn values(&self) -> &[U64];
 
     /// Get the cyclotomic order
-    fn cyclotomic_order(&self) -> usize;
+    fn cyclotomic_order(&self) -> U64;
 
     /// Adds one to every entry of the Element
     fn add_assign_one(&mut self);
@@ -118,7 +115,7 @@ pub trait Element:
     ///
     /// `p`: multiplicand
     /// `q`: divisor
-    fn multiply_and_round(&self, p: Self::IntType, q: Self::IntType) -> Self;
+    fn multiply_and_round(&self, p: U64, q: U64) -> Self;
 
     /// Calculate the vector of elements by raising the base element to successive powers
     fn powers_of_base(&self, base_bits: usize) -> Vec<Self>;
@@ -131,10 +128,10 @@ pub trait Element:
     /// `root_of_unity_arb`: the new arbitrary cyclotomics CRT
     fn switch_modulus(
         &mut self,
-        modulus: Self::IntType,
-        root_of_unity: Self::IntType,
-        modulus_arb: Self::IntType,
-        root_of_unity_arb: Self::IntType,
+        modulus: Odd<U64>,
+        root_of_unity: U64,
+        modulus_arb: Odd<U64>,
+        root_of_unity_arb: U64,
     );
 
     /// Convert from coefficient to CRT or vice versa.
