@@ -128,9 +128,9 @@ serde_str_or_u8!(ProxyPreEncryptionMode);
 #[repr(usize)]
 pub enum MultipartyMode {
     /// Not valid
-    #[default]
     Invalid = 0,
     /// Fixed noise mode
+    #[default]
     FixedNoise,
     /// Noise flooding mode
     NoiseFlooding,
@@ -351,3 +351,48 @@ pub enum BaseSamplerType {
 
 hex_enum_usize!(BaseSamplerType);
 try_serde_str_or_u8!(BaseSamplerType);
+
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr, TryFrom,
+)]
+#[try_from(repr)]
+#[repr(usize)]
+pub enum DistributionType {
+    #[default]
+    Uniform = 0,
+    Error,
+    Ternary,
+}
+hex_enum_usize!(DistributionType);
+try_serde_str_or_u8!(DistributionType);
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr)]
+#[repr(usize)]
+pub enum SecurityLevel {
+    #[default]
+    HeStdNotSet = 0,
+    HeStd128Classic,
+    HeStd192Classic,
+    HeStd256Classic,
+    HeStd128Quantum,
+    HeStd192Quantum,
+    HeStd256Quantum,
+}
+
+hex_enum_usize!(SecurityLevel);
+
+impl From<usize> for SecurityLevel {
+    fn from(value: usize) -> Self {
+        match value {
+            1 => SecurityLevel::HeStd128Classic,
+            2 => SecurityLevel::HeStd192Classic,
+            3 => SecurityLevel::HeStd256Classic,
+            4 => SecurityLevel::HeStd128Quantum,
+            5 => SecurityLevel::HeStd192Quantum,
+            6 => SecurityLevel::HeStd256Quantum,
+            _ => SecurityLevel::HeStdNotSet,
+        }
+    }
+}
+
+serde_str_or_u8!(SecurityLevel);

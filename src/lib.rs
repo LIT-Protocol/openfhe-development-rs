@@ -23,6 +23,7 @@ pub mod context;
 mod core;
 pub mod encoding;
 pub mod error;
+pub mod pke;
 mod serdes;
 
 trait ActingPrimitive {

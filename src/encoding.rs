@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
     plaintext_big_modulus,
     plaintext_big_root_of_unity
 )]
-pub struct Params {
+pub struct EncodingParams {
     /// maximum batch size used by EvalSumKeyGen for packed encoding
     pub batch_size: usize,
     /// plaintext generator is used for packed encoding (to find the correct automorphism index)
