@@ -254,8 +254,8 @@ impl Poly {
         }
     }
 
-    pub fn cyclotomic_order(&self) -> &U64 {
-        &self.params.cyclotomic_order
+    pub fn cyclotomic_order(&self) -> usize {
+        self.params.cyclotomic_order
     }
 
     /// Permutes coefficients in a polynomial. Moves the ith index to the
@@ -267,17 +267,12 @@ impl Poly {
     pub fn automorphism_transform(&self, k: usize) -> Self {
         assert_eq!(k & 1, 1, "k must be odd");
 
-        let n: u64 = self.params.ring_dimension.to_primitive();
-        let n = n as usize;
-        let m: u64 = self.params.cyclotomic_order.to_primitive();
-        let m = m as usize;
-
         assert!(
-            m.is_power_of_two(),
+            self.params.cyclotomic_order.is_power_of_two(),
             "Automorphism transform is only supported for power of two cyclotomic rings"
         );
 
-        let log_m = (usize::BITS - m.leading_zeros()) as usize;
+        let log_m = (usize::BITS - self.params.cyclotomic_order.leading_zeros()) as usize;
         let log_n = log_m - 1;
         let mask = (1 << log_n) - 1;
 
@@ -287,7 +282,7 @@ impl Poly {
 
                 let mut result = self.clone();
 
-                for j in 1..n {
+                for j in 1..self.params.ring_dimension {
                     let jrev = reverse_bits(j, log_n);
                     let idxrev = reverse_bits((jk >> 1) & mask, log_n);
                     result.values[jrev] = self.values[idxrev];
@@ -300,7 +295,7 @@ impl Poly {
                 let mut jk = 0;
                 let modulus = self.params.ciphertext_modulus.get();
 
-                for j in 1..n {
+                for j in 1..self.params.ring_dimension {
                     let idx = jk & mask;
                     result.values[idx] = if ((jk >> log_n) & 0x1) == 1 {
                         modulus - self.values[j]
@@ -317,10 +312,8 @@ impl Poly {
 
     pub fn automorphism_transform_precompute(&self, k: usize, vec: &[usize]) -> Self {
         assert_eq!(k & 1, 1, "k must be odd");
-        let m: u64 = self.params.cyclotomic_order.to_primitive();
-        let m = m as usize;
         assert!(
-            m.is_power_of_two(),
+            self.params.cyclotomic_order.is_power_of_two(),
             "Automorphism transform is only supported for power of two cyclotomic rings"
         );
         assert_eq!(
@@ -452,22 +445,20 @@ impl Poly {
     }
 
     pub fn zero(params: ElementParams) -> Self {
-        let order: u64 = params.cyclotomic_order.to_primitive();
         Self {
             format: PolynomialRingFormat::default(),
             params,
-            values: vec![U64::ZERO; order as usize],
+            values: vec![U64::ZERO; params.cyclotomic_order],
             monty_params_ciphertext_modulus: MontyParams::new(params.ciphertext_modulus),
             monty_params_big_ciphertext_modulus: MontyParams::new(params.big_ciphertext_modulus),
         }
     }
 
     pub fn max(params: ElementParams) -> Self {
-        let order: u64 = params.cyclotomic_order.to_primitive();
         Self {
             format: PolynomialRingFormat::default(),
             params,
-            values: vec![params.ciphertext_modulus.get() - U64::ONE; order as usize],
+            values: vec![params.ciphertext_modulus.get() - U64::ONE; params.cyclotomic_order],
             monty_params_ciphertext_modulus: MontyParams::new(params.ciphertext_modulus),
             monty_params_big_ciphertext_modulus: MontyParams::new(params.big_ciphertext_modulus),
         }
@@ -488,15 +479,15 @@ impl Poly {
             &self.params.root_of_unity,
             self.monty_params_ciphertext_modulus,
         );
-        let order: u64 = self.params.cyclotomic_order.to_primitive();
-        let order = order as usize;
-        while m < self.params.cyclotomic_order {
+        let order = self.params.cyclotomic_order;
+        let cyclotomic_order = U64::from_u64(order as u64);
+        while m < cyclotomic_order {
             let half_m: u64 = m.to_primitive();
             let half_m = half_m as usize;
             m <<= 1;
 
             let divisor = CtOption::from(m.to_nz()).expect("m is not zero");
-            let exponent = self.params.cyclotomic_order / divisor;
+            let exponent = cyclotomic_order / divisor;
 
             let omega_m = root_of_unity.pow(&exponent);
             let step: u64 = m.to_primitive();
@@ -584,15 +575,15 @@ impl NttPoly {
         bit_reverse_permutation(&mut values);
 
         let mut m = U64::ONE;
-        let order: u64 = self.params.cyclotomic_order.to_primitive();
-        let order = order as usize;
-        while m < self.params.cyclotomic_order {
+        let order = self.params.cyclotomic_order;
+        let cyclotomic_order = U64::from_u64(order as u64);
+        while m < cyclotomic_order {
             let half_m: u64 = m.to_primitive();
             let half_m = half_m as usize;
             m <<= 1;
 
             let divisor = CtOption::from(m.to_nz()).expect("m is not zero");
-            let exponent = self.params.cyclotomic_order / divisor;
+            let exponent = cyclotomic_order / divisor;
 
             let omega_m = inv_root.pow(&exponent);
             let step: u64 = m.to_primitive();
@@ -611,7 +602,7 @@ impl NttPoly {
         }
 
         let n = MontyForm::<{ U64::LIMBS }>::new(
-            &self.params.cyclotomic_order,
+            &cyclotomic_order,
             self.monty_params_ciphertext_modulus,
         );
         let n_inv = CtOption::from(n.inv()).expect("n is not zero");

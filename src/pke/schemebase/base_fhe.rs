@@ -18,5 +18,5 @@ pub trait FheBase {
         precompute: bool,
     );
 
-    fn eval_bootstrap_key_gen() -> HashMap<usize, EvalKey<Element>>;
+    // fn eval_bootstrap_key_gen() -> HashMap<usize, EvalKey<Element>>;
 }

@@ -366,6 +366,10 @@ pub enum DistributionType {
 hex_enum_usize!(DistributionType);
 try_serde_str_or_u8!(DistributionType);
 
+impl DistributionType {
+    pub const NUM_VALUES: usize = 3;
+}
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr)]
 #[repr(usize)]
 pub enum SecurityLevel {
@@ -396,3 +400,7 @@ impl From<usize> for SecurityLevel {
 }
 
 serde_str_or_u8!(SecurityLevel);
+
+impl SecurityLevel {
+    pub const NUM_VALUES: usize = 7;
+}

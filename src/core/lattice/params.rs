@@ -1,11 +1,13 @@
-use crate::constants::MAX_MODULUS_SIZE;
+use crate::constants::{DistributionType, MAX_MODULUS_SIZE, SecurityLevel};
 use crate::core::utils::{get_totient, previous_prime, root_of_unity};
 use crate::error::Error;
 use crypto_bigint::{Odd, U64};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::cell::{LazyCell, OnceCell};
+use std::collections::{HashMap, VecDeque};
 use std::ops::{Index, IndexMut};
+use std::sync::LazyLock;
 use subtle::CtOption;
 
 /// Parameters for an element
@@ -21,9 +23,9 @@ use subtle::CtOption;
 )]
 pub struct ElementParams {
     /// The ring dimension
-    pub ring_dimension: U64,
+    pub ring_dimension: usize,
     /// The cyclotomic order
-    pub cyclotomic_order: U64,
+    pub cyclotomic_order: usize,
     /// The ciphertext modulus
     pub ciphertext_modulus: Odd<U64>,
     /// The ciphertext modulus root of unity
@@ -35,7 +37,7 @@ pub struct ElementParams {
 }
 
 impl ElementParams {
-    pub fn with_modulus_bits(order: U64, bits: usize) -> Self {
+    pub fn with_modulus_bits(order: usize, bits: usize) -> Self {
         if bits > MAX_MODULUS_SIZE {
             panic!(
                 "Requested bit length {} exceeds maximum allowed length {}",
@@ -50,13 +52,13 @@ impl ElementParams {
         )
     }
 
-    pub fn with_modulus(order: U64, ciphertext_modulus: Odd<U64>) -> Self {
+    pub fn with_modulus(order: usize, ciphertext_modulus: Odd<U64>) -> Self {
         let root_of_unity = root_of_unity(order, ciphertext_modulus);
         Self::with_ciphertext_root_of_unity(order, ciphertext_modulus, root_of_unity)
     }
 
     pub fn with_ciphertext_root_of_unity(
-        order: U64,
+        order: usize,
         ciphertext_modulus: Odd<U64>,
         root_of_unity: U64,
     ) -> Self {
@@ -70,7 +72,7 @@ impl ElementParams {
     }
 
     pub fn with_big_ciphertext_params(
-        cyclotomic_order: U64,
+        cyclotomic_order: usize,
         ciphertext_modulus: Odd<U64>,
         root_of_unity: U64,
         big_ciphertext_modulus: Odd<U64>,
@@ -89,7 +91,7 @@ impl ElementParams {
 
 #[derive(Debug, Clone)]
 pub struct DcrtElementParamsBuilder {
-    pub ciphertext_order: U64,
+    pub ciphertext_order: usize,
     pub modulus: Option<Odd<U64>>,
     pub depth: Option<usize>,
     pub bits: Option<usize>,
@@ -100,7 +102,7 @@ pub struct DcrtElementParamsBuilder {
 }
 
 impl DcrtElementParamsBuilder {
-    pub fn new(ciphertext_order: U64) -> Self {
+    pub fn new(ciphertext_order: usize) -> Self {
         Self {
             ciphertext_order,
             modulus: None,
@@ -321,3 +323,924 @@ impl DcrtElementParams {
         }
     }
 }
+
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Display, Serialize, Deserialize)]
+#[display(
+    "LatticeParams {{ distribution_type: {distribution_type}, ring_dimension: {ring_dimension}, min_security_level: {min_security_level}, max_log_q: {max_log_q} }}"
+)]
+pub struct LatticeParams {
+    pub distribution_type: DistributionType,
+    pub ring_dimension: usize,
+    pub min_security_level: SecurityLevel,
+    pub max_log_q: usize,
+}
+
+impl LatticeParams {
+    pub fn find_max_q(
+        distribution_type: DistributionType,
+        security_level: SecurityLevel,
+        ring_dimension: usize,
+    ) -> usize {
+        let dist = distribution_type as usize;
+        let sec = security_level as usize;
+        BY_RING[dist][sec]
+            .get(&ring_dimension)
+            .map(|l| l.max_log_q)
+            .unwrap_or_default()
+    }
+
+    pub fn find_ring_dimension(
+        distribution_type: DistributionType,
+        security_level: SecurityLevel,
+        current_log_q: usize,
+    ) -> usize {
+        let dist = distribution_type as usize;
+        let sec = security_level as usize;
+        let mut prev = 0;
+        let mut n = 0;
+        for (&log_q, &lattice) in BY_LOG_Q[dist][sec].iter() {
+            if current_log_q <= log_q && current_log_q > prev {
+                return lattice.ring_dimension;
+            }
+            prev = log_q;
+            n = lattice.ring_dimension;
+        }
+        n * 2
+    }
+}
+
+static BY_RING: LazyLock<
+    [[HashMap<usize, &'static LatticeParams>; SecurityLevel::NUM_VALUES];
+        DistributionType::NUM_VALUES],
+> = LazyLock::new(|| {
+    let mut map = [
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+    ];
+    for p in LATTICE_PARAMS.iter() {
+        map[p.distribution_type as usize][p.min_security_level as usize]
+            .insert(p.ring_dimension, p);
+    }
+    map
+});
+
+static BY_LOG_Q: LazyLock<
+    [[HashMap<usize, &'static LatticeParams>; SecurityLevel::NUM_VALUES];
+        DistributionType::NUM_VALUES],
+> = LazyLock::new(|| {
+    let mut map = [
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+        [
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+            HashMap::with_capacity(LATTICE_PARAMS.len()),
+        ],
+    ];
+    for p in LATTICE_PARAMS.iter() {
+        map[p.distribution_type as usize][p.min_security_level as usize].insert(p.max_log_q, p);
+    }
+    map
+});
+
+static LATTICE_PARAMS: LazyLock<Vec<LatticeParams>> = LazyLock::new(|| {
+    vec![
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 29,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 21,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 16,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 56,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 39,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 31,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 111,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 77,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 60,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 220,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 154,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 120,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 440,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 307,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 239,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 880,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 612,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 478,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 29,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 21,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 16,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 56,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 39,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 31,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 111,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 77,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 60,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 220,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 154,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 120,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 440,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 307,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 239,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 883,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 613,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 478,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 1749,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 1201,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 931,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 3525,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 2413,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 1868,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 27,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 19,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 14,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 54,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 37,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 29,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 109,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 75,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 58,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 218,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 152,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 118,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 438,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 305,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 237,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 881,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 611,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 476,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 1747,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 1199,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 929,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd128Classic,
+            max_log_q: 3523,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd192Classic,
+            max_log_q: 2411,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd256Classic,
+            max_log_q: 1866,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 27,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 19,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 15,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 53,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 37,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 29,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 103,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 72,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 56,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 206,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 143,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 111,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 413,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 286,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 222,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 829,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 573,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Uniform,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 445,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 27,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 19,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 15,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 53,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 37,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 29,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 103,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 72,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 56,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 206,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 143,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 111,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 413,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 286,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 222,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 829,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 573,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 445,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 1665,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 1147,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 890,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 3351,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 2304,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Error,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 1786,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 25,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 17,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 1024,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 13,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 51,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 35,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 2048,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 27,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 101,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 70,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 4096,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 54,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 202,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 141,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 8192,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 109,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 411,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 284,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 16384,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 220,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 827,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 571,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 32768,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 443,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 1663,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 1145,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 65536,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 888,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd128Quantum,
+            max_log_q: 3348,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd192Quantum,
+            max_log_q: 2301,
+        },
+        LatticeParams {
+            distribution_type: DistributionType::Ternary,
+            ring_dimension: 131072,
+            min_security_level: SecurityLevel::HeStd256Quantum,
+            max_log_q: 1784,
+        },
+    ]
+});
