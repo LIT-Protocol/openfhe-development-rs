@@ -252,7 +252,7 @@ try_serde_str_or_u8!(MultiplicationTechnique);
 /// Plaintext Encodings
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr)]
 #[repr(usize)]
-pub enum PlaintextEncodings {
+pub enum PlaintextEncodingsType {
     /// Invalid
     #[default]
     Invalid = 0,
@@ -266,21 +266,21 @@ pub enum PlaintextEncodings {
     CkksPacked,
 }
 
-hex_enum_usize!(PlaintextEncodings);
+hex_enum_usize!(PlaintextEncodingsType);
 
-impl From<usize> for PlaintextEncodings {
+impl From<usize> for PlaintextEncodingsType {
     fn from(value: usize) -> Self {
         match value {
-            1 => PlaintextEncodings::CoefficientPacked,
-            2 => PlaintextEncodings::Packed,
-            3 => PlaintextEncodings::String,
-            4 => PlaintextEncodings::CkksPacked,
-            _ => PlaintextEncodings::Invalid,
+            1 => PlaintextEncodingsType::CoefficientPacked,
+            2 => PlaintextEncodingsType::Packed,
+            3 => PlaintextEncodingsType::String,
+            4 => PlaintextEncodingsType::CkksPacked,
+            _ => PlaintextEncodingsType::Invalid,
         }
     }
 }
 
-serde_str_or_u8!(PlaintextEncodings);
+serde_str_or_u8!(PlaintextEncodingsType);
 
 /// Ciphertext Compression Levels
 #[derive(

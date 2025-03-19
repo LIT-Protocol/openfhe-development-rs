@@ -47,7 +47,7 @@ impl PlaintextEncodings {
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Display, Deserialize, Serialize)]
 #[display(
-    "BasePlaintextParams {{ scaling_factor: {scaling_factor}, level: {level}, noise_scale_degree: {noise_scale_degree}, slots: {slots}, encoding_params: {encoding_params} }}"
+    "PlaintextParams {{ scaling_factor: {scaling_factor}, level: {level}, noise_scale_degree: {noise_scale_degree}, slots: {slots}, encoding_params: {encoding_params} }}"
 )]
 pub struct PlaintextParams {
     pub scaling_factor: f64,

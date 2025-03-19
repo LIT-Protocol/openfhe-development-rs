@@ -1,5 +1,4 @@
 use crate::constants::PolynomialRingFormat;
-use crate::core::lattice::element::Element;
 use crate::core::lattice::params::ElementParams;
 use crate::serdes::monty_params;
 

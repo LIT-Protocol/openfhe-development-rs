@@ -3,7 +3,7 @@ mod rlwe;
 mod rns;
 mod utils;
 
-use derive_more::{Display, FromStr, TryFrom};
+use derive_more::{Display, FromStr};
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Display, FromStr)]
 #[repr(usize)]

@@ -18,9 +18,11 @@
 #[macro_use]
 mod macros;
 
+mod ciphertext;
 pub mod constants;
 pub mod context;
 mod core;
+mod crypto_object;
 pub mod encoding;
 pub mod error;
 pub mod pke;
