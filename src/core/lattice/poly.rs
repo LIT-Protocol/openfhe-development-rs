@@ -7,6 +7,9 @@ use crate::core::utils::reverse_bits;
 use crypto_bigint::modular::{MontyParams, Retrieve};
 use crypto_bigint::{Monty, NonZero, Odd, U64, modular::MontyForm};
 use num::Integer;
+use rand::distr::Distribution;
+use rand::{Rng, RngCore};
+use rand_distr::Normal;
 use serde::{Deserialize, Serialize};
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Rem, RemAssign, Sub,
@@ -215,6 +218,27 @@ impl MulAssign<&Poly> for Poly {
 }
 
 impl Poly {
+    pub fn from_discrete_gaussian(
+        params: ElementParams,
+        format: PolynomialRingFormat,
+        mut rng: impl RngCore,
+    ) -> Self {
+        let mut dgg = Normal::new(0.0, 1.0).unwrap();
+        let monty_params_ciphertext_modulus = MontyParams::new(params.ciphertext_modulus);
+        let monty_params_big_ciphertext_modulus = MontyParams::new(params.big_ciphertext_modulus);
+        let mut result = Self {
+            format: PolynomialRingFormat::Coefficient,
+            params,
+            values: (0..params.ring_dimension)
+                .map(|_| U64::from_u64(dgg.sample(&mut rng) as u64))
+                .collect(),
+            monty_params_ciphertext_modulus,
+            monty_params_big_ciphertext_modulus,
+        };
+        result.switch_format();
+        result
+    }
+
     pub fn clone_empty(&self) -> Self {
         todo!()
     }
