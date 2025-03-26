@@ -1,8 +1,9 @@
 use crate::ActingPrimitive;
 use crypto_bigint::{
-    Monty, NonZero, Odd, RandomMod, U64, modular::MontyForm, rand_core::SeedableRng,
+    Monty, NonZero, Odd, RandomMod, U64, Uint, modular::MontyForm, rand_core::SeedableRng,
 };
 use num::integer;
+use subtle::Choice;
 
 /// Compute phi of `n` which is the number of integers `m` coprime to `n` such that `1 <= m < n`
 pub fn get_totient(n: usize) -> usize {

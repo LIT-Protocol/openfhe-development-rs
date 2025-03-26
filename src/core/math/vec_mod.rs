@@ -1,5 +1,5 @@
 use crypto_bigint::modular::{MontyForm, MontyParams, SafeGcdInverter};
-use crypto_bigint::{Concat, NonZero, Odd, PrecomputeInverter, Split, Uint};
+use crypto_bigint::*;
 use std::marker::PhantomData;
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign,
@@ -75,6 +75,8 @@ macro_rules! ops_impl {
         }
     };
 }
+
+pub type VecModStd = VecMod<{ U64::LIMBS }, { U128::LIMBS }>;
 
 #[derive(Debug, Clone)]
 pub struct VecMod<const LIMBS: usize, const WIDE_LIMBS: usize>
@@ -451,6 +453,14 @@ where
             params,
             _marker: PhantomData,
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Uint<LIMBS>> {
+        self.values.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Uint<LIMBS>> {
+        self.values.iter_mut()
     }
 
     pub fn len(&self) -> usize {
