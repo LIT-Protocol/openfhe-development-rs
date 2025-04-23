@@ -1,5 +1,11 @@
 use crypto_bigint::modular::{MontyForm, MontyParams, SafeGcdInverter};
 use crypto_bigint::*;
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error as DError, MapAccess, SeqAccess, Visitor},
+    ser::SerializeStruct,
+};
+use std::fmt::Formatter;
 use std::marker::PhantomData;
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign,
@@ -87,6 +93,16 @@ where
     pub values: Vec<Uint<LIMBS>>,
     pub params: MontyParams<LIMBS>,
     pub _marker: PhantomData<[(); WIDE_LIMBS]>,
+}
+
+impl<const LIMBS: usize, const WIDE_LIMBS: usize> AsRef<[Uint<LIMBS>]> for VecMod<LIMBS, WIDE_LIMBS>
+where
+    Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>>,
+    Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>>,
+{
+    fn as_ref(&self) -> &[Uint<LIMBS>] {
+        &self.values
+    }
 }
 
 impl<const LIMBS: usize, const WIDE_LIMBS: usize> Index<usize> for VecMod<LIMBS, WIDE_LIMBS>
@@ -425,10 +441,160 @@ where
     }
 }
 
-impl<const LIMBS: usize, const WIDE_LIMBS: usize> VecMod<LIMBS, WIDE_LIMBS>
+impl<const LIMBS: usize, const WIDE_LIMBS: usize> Serialize for VecMod<LIMBS, WIDE_LIMBS>
+where
+    Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>> + Serialize,
+    Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>> + Serialize,
+{
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = s.serialize_struct("VecMod", 2)?;
+        state.serialize_field("modulus", self.params.modulus())?;
+        state.serialize_field("values", &self.values)?;
+        state.end()
+    }
+}
+
+impl<'de, const LIMBS: usize, const WIDE_LIMBS: usize> Deserialize<'de>
+    for VecMod<LIMBS, WIDE_LIMBS>
+where
+    Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>> + Deserialize<'de>,
+    Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>> + Deserialize<'de>,
+{
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct VecModVisitor<'de, const LIMBS: usize, const WIDE_LIMBS: usize>
+        where
+            Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>> + Deserialize<'de>,
+            Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>> + Deserialize<'de>,
+        {
+            _marker: PhantomData<&'de [(); WIDE_LIMBS]>,
+        }
+
+        enum Field {
+            Values,
+            Modulus,
+        }
+        const FIELDS: &[&str] = &["values", "modulus"];
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(d: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, f: &mut Formatter) -> std::fmt::Result {
+                        write!(f, "`values` or `modulus`")
+                    }
+
+                    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                    where
+                        E: DError,
+                    {
+                        match v {
+                            "values" => Ok(Field::Values),
+                            "modulus" => Ok(Field::Modulus),
+                            _ => Err(DError::unknown_field(v, FIELDS)),
+                        }
+                    }
+                }
+
+                d.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        impl<'de, const LIMBS: usize, const WIDE_LIMBS: usize> Visitor<'de>
+            for VecModVisitor<'de, LIMBS, WIDE_LIMBS>
+        where
+            Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>> + Deserialize<'de>,
+            Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>> + Deserialize<'de>,
+        {
+            type Value = VecMod<LIMBS, WIDE_LIMBS>;
+
+            fn expecting(&self, f: &mut Formatter) -> std::fmt::Result {
+                write!(f, "a modulus and values")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let modulus: Odd<Uint<LIMBS>> = seq
+                    .next_element()?
+                    .ok_or_else(|| DError::invalid_length(0, &self))?;
+                let values: Vec<Uint<LIMBS>> = seq
+                    .next_element()?
+                    .ok_or_else(|| DError::invalid_length(1, &self))?;
+
+                Ok(VecMod {
+                    values,
+                    params: MontyParams::new(modulus),
+                    _marker: PhantomData,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut values = None;
+                let mut modulus = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Values => {
+                            if values.is_some() {
+                                return Err(DError::duplicate_field("values"));
+                            }
+
+                            values = Some(map.next_value()?);
+                        }
+                        Field::Modulus => {
+                            if modulus.is_some() {
+                                return Err(DError::duplicate_field("modulus"));
+                            }
+
+                            modulus = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let modulus: Odd<Uint<LIMBS>> =
+                    modulus.ok_or_else(|| DError::missing_field("modulus"))?;
+                let values: Vec<Uint<LIMBS>> =
+                    values.ok_or_else(|| DError::missing_field("values"))?;
+                Ok(VecMod {
+                    values,
+                    params: MontyParams::new(modulus),
+                    _marker: PhantomData,
+                })
+            }
+        }
+
+        d.deserialize_struct(
+            "VecMod",
+            FIELDS,
+            VecModVisitor::<LIMBS, WIDE_LIMBS> {
+                _marker: PhantomData,
+            },
+        )
+    }
+}
+
+impl<const LIMBS: usize, const WIDE_LIMBS: usize, const UNSAT_LIMBS: usize>
+    VecMod<LIMBS, WIDE_LIMBS>
 where
     Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>>,
     Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>>,
+    Odd<Uint<LIMBS>>: PrecomputeInverter<Inverter = SafeGcdInverter<LIMBS, UNSAT_LIMBS>>,
 {
     pub fn with_value_uint(len: usize, value: Uint<LIMBS>, modulus: Odd<Uint<LIMBS>>) -> Self {
         let nz_modulus = modulus.as_nz_ref();
@@ -455,6 +621,18 @@ where
         }
     }
 
+    pub fn inverse(&self) -> Option<Self> {
+        let mut result = self.clone();
+        if result.values.iter().any(|i| i.is_zero().into()) {
+            return None;
+        }
+        result.values.iter_mut().for_each(|i| {
+            let ct = i.inv_odd_mod(self.params.modulus());
+            *i = ct.expect("to not fail since i is not zero");
+        });
+        Some(result)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Uint<LIMBS>> {
         self.values.iter()
     }
@@ -465,6 +643,10 @@ where
 
     pub fn len(&self) -> usize {
         self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     pub fn rem_mod_2(&self) -> Self {

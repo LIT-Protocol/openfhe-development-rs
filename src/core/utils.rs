@@ -145,3 +145,22 @@ pub fn reverse_bits(n: usize, bits: usize) -> usize {
     }
     result
 }
+
+pub fn find_in_vector(values: &[f64], search: f64) -> isize {
+    let mut low = 0;
+    let mut high = values.len() - 1;
+
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        if values[mid] < search {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    if low < values.len() {
+        return (low + 1) as isize;
+    }
+    panic!("value not found in vector");
+}

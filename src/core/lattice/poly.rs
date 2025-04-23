@@ -1,8 +1,10 @@
 use crate::constants::PolynomialRingFormat;
 use crate::core::lattice::params::ElementParams;
 use crate::serdes::monty_params;
+use std::marker::PhantomData;
 
 use crate::ActingPrimitive;
+use crate::core::math::{DiscreteGaussian, VecMod, VecModStd};
 use crate::core::utils::reverse_bits;
 use crypto_bigint::modular::{MontyParams, Retrieve};
 use crypto_bigint::{Monty, NonZero, Odd, U64, modular::MontyForm};
@@ -65,7 +67,7 @@ macro_rules! poly_ops_variants {
 pub struct Poly {
     format: PolynomialRingFormat,
     params: ElementParams,
-    values: Vec<U64>,
+    values: VecModStd,
     #[serde(with = "monty_params")]
     monty_params_ciphertext_modulus: MontyParams<{ U64::LIMBS }>,
     #[serde(with = "monty_params")]
@@ -111,7 +113,7 @@ poly_ops_variants!(Add, add, +, AddAssign, add_assign, +=, LHS = Poly, RHS = U64
 poly_ops_variants!(Sub, sub, -, SubAssign, sub_assign, -=, LHS = Poly, RHS = U64, Output = Poly);
 poly_ops_variants!(Mul, mul, *, MulAssign, mul_assign, *=, LHS = Poly, RHS = U64, Output = Poly);
 poly_ops_variants!(Div, div, /, DivAssign, div_assign, /=, LHS = Poly, RHS = U64, Output = Poly);
-poly_ops_variants!(Rem, rem, %, RemAssign, rem_assign, %=, LHS = Poly, RHS = U64, Output = Poly);
+poly_ops_variants!(Rem, rem, %, RemAssign, rem_assign, %=, LHS = Poly, RHS = Odd<U64>, Output = Poly);
 
 poly_ops_variants!(Mul, mul, *, MulAssign, mul_assign, *=, LHS = Poly, RHS = (U64, U64), Output = Poly);
 
@@ -139,21 +141,13 @@ impl AddAssign<&U64> for Poly {
 
 impl SubAssign<&U64> for Poly {
     fn sub_assign(&mut self, rhs: &U64) {
-        let r = MontyForm::new(rhs, self.monty_params_ciphertext_modulus);
-        for e in self.values.iter_mut() {
-            let i = MontyForm::new(e, self.monty_params_ciphertext_modulus);
-            *e = (i - r).retrieve();
-        }
+        self.values -= rhs;
     }
 }
 
 impl MulAssign<&U64> for Poly {
     fn mul_assign(&mut self, rhs: &U64) {
-        let r = MontyForm::new(rhs, self.monty_params_ciphertext_modulus);
-        for e in self.values.iter_mut() {
-            let i = MontyForm::new(e, self.monty_params_ciphertext_modulus);
-            *e = (i * r).retrieve();
-        }
+        self.values *= rhs;
     }
 }
 
@@ -164,12 +158,9 @@ impl MulAssign<&(U64, U64)> for Poly {
     }
 }
 
-impl RemAssign<&U64> for Poly {
-    fn rem_assign(&mut self, rhs: &U64) {
-        let m = CtOption::<NonZero<U64>>::from(rhs.to_nz()).expect("rhs is not zero");
-        for e in self.values.iter_mut() {
-            *e %= m;
-        }
+impl RemAssign<&Odd<U64>> for Poly {
+    fn rem_assign(&mut self, rhs: &Odd<U64>) {
+        self.values %= rhs;
     }
 }
 
@@ -189,11 +180,7 @@ impl AddAssign<&Poly> for Poly {
         assert_eq!(self.params, rhs.params);
         assert_eq!(self.format, rhs.format);
 
-        for (l, r) in self.values.iter_mut().zip(&rhs.values) {
-            let ll = MontyForm::new(l, self.monty_params_ciphertext_modulus);
-            let rr = MontyForm::new(r, self.monty_params_ciphertext_modulus);
-            *l = (ll + rr).retrieve();
-        }
+        self.values += &rhs.values;
     }
 }
 
@@ -202,11 +189,7 @@ impl SubAssign<&Poly> for Poly {
         assert_eq!(self.params, rhs.params);
         assert_eq!(self.format, rhs.format);
 
-        for (l, r) in self.values.iter_mut().zip(&rhs.values) {
-            let ll = MontyForm::new(l, self.monty_params_ciphertext_modulus);
-            let rr = MontyForm::new(r, self.monty_params_ciphertext_modulus);
-            *l = (ll - rr).retrieve();
-        }
+        self.values -= &rhs.values;
     }
 }
 
@@ -218,37 +201,21 @@ impl MulAssign<&Poly> for Poly {
 }
 
 impl Poly {
-    pub fn from_discrete_gaussian(
+    pub fn discrete_gaussian(
         params: ElementParams,
         format: PolynomialRingFormat,
-        mut rng: impl RngCore,
+        discrete_gaussian: &mut DiscreteGaussian,
     ) -> Self {
-        let mut dgg = Normal::new(0.0, 1.0).unwrap();
-        let monty_params_ciphertext_modulus = MontyParams::new(params.ciphertext_modulus);
-        let monty_params_big_ciphertext_modulus = MontyParams::new(params.big_ciphertext_modulus);
-        let mut result = Self {
+        let mut res = Self {
             format: PolynomialRingFormat::Coefficient,
             params,
-            values: (0..params.ring_dimension)
-                .map(|_| U64::from_u64(dgg.sample(&mut rng) as u64))
-                .collect(),
-            monty_params_ciphertext_modulus,
-            monty_params_big_ciphertext_modulus,
+            values: discrete_gaussian
+                .gen_vec_mod(params.ring_dimension, &params.ciphertext_modulus),
+            monty_params_ciphertext_modulus: MontyParams::new(params.ciphertext_modulus),
+            monty_params_big_ciphertext_modulus: MontyParams::new(params.big_ciphertext_modulus),
         };
-        result.switch_format();
-        result
-    }
-
-    pub fn clone_empty(&self) -> Self {
-        todo!()
-    }
-
-    pub fn clone_parameters(&self) -> Self {
-        todo!()
-    }
-
-    pub fn clone_with_noise(&self) -> Self {
-        todo!()
+        // res.set_format(format);
+        res
     }
 
     pub fn format(&self) -> PolynomialRingFormat {
@@ -268,7 +235,7 @@ impl Poly {
     }
 
     pub fn values(&self) -> &[U64] {
-        &self.values
+        self.values.as_ref()
     }
 
     pub fn set_values(&mut self, values: &[u64]) {
@@ -354,7 +321,7 @@ impl Poly {
     }
 
     pub fn transpose(&self) -> Self {
-        todo!()
+        self.automorphism_transform(self.params.cyclotomic_order - 1)
     }
 
     pub fn base_decompose(&self, base_bits: usize, eval_mode_answer: bool) -> Vec<Self> {
@@ -383,16 +350,13 @@ impl Poly {
     }
 
     pub fn inverse(&self) -> Option<Self> {
-        if self.values.iter().any(|v| *v == U64::ZERO) {
-            None
-        } else {
-            let mut result = self.clone();
-            for i in result.values.iter_mut() {
-                let ii = MontyForm::new(i, result.monty_params_ciphertext_modulus);
-                *i = CtOption::from(ii.inv()).expect("i is not zero").retrieve();
-            }
-            Some(result)
-        }
+        self.values.inverse().map(|values| Self {
+            format: self.format,
+            params: self.params,
+            values,
+            monty_params_ciphertext_modulus: self.monty_params_ciphertext_modulus,
+            monty_params_big_ciphertext_modulus: self.monty_params_big_ciphertext_modulus,
+        })
     }
 
     pub fn norm(&self) -> f64 {
@@ -401,7 +365,7 @@ impl Poly {
         let mut max = 0;
         let mut min = q;
 
-        for v in &self.values {
+        for v in &self.values.values {
             let v = v.to_primitive();
             if v > half {
                 min = std::cmp::min(v, min);
@@ -422,7 +386,13 @@ impl Poly {
     }
 
     pub fn mod_2(&self) -> Self {
-        todo!()
+        Self {
+            format: self.format,
+            params: self.params,
+            values: self.values.rem_mod_2(),
+            monty_params_ciphertext_modulus: self.monty_params_ciphertext_modulus,
+            monty_params_big_ciphertext_modulus: self.monty_params_big_ciphertext_modulus,
+        }
     }
 
     pub fn powers_of_base(&self, base_bits: usize) -> Vec<Self> {
@@ -472,20 +442,37 @@ impl Poly {
         Self {
             format: PolynomialRingFormat::default(),
             params,
-            values: vec![U64::ZERO; params.cyclotomic_order],
+            values: VecMod::with_value_uint(
+                params.cyclotomic_order,
+                U64::ZERO,
+                params.ciphertext_modulus,
+            ),
             monty_params_ciphertext_modulus: MontyParams::new(params.ciphertext_modulus),
             monty_params_big_ciphertext_modulus: MontyParams::new(params.big_ciphertext_modulus),
         }
+    }
+
+    pub fn set_zero(&mut self) {
+        self.values.values.iter_mut().for_each(|d| *d = U64::ZERO);
     }
 
     pub fn max(params: ElementParams) -> Self {
         Self {
             format: PolynomialRingFormat::default(),
             params,
-            values: vec![params.ciphertext_modulus.get() - U64::ONE; params.cyclotomic_order],
+            values: VecMod::with_value_uint(
+                params.cyclotomic_order,
+                params.ciphertext_modulus.get() - U64::ONE,
+                params.ciphertext_modulus,
+            ),
             monty_params_ciphertext_modulus: MontyParams::new(params.ciphertext_modulus),
             monty_params_big_ciphertext_modulus: MontyParams::new(params.big_ciphertext_modulus),
         }
+    }
+
+    pub fn set_max(&mut self) {
+        let m = self.params.ciphertext_modulus.get() - U64::ONE;
+        self.values.values.iter_mut().for_each(|d| *d = m);
     }
 
     fn ntt(&self) -> NttPoly {
@@ -637,7 +624,11 @@ impl NttPoly {
         Poly {
             format: self.format,
             params: self.params,
-            values: values.iter().map(|v| v.retrieve()).collect(),
+            values: VecMod {
+                values: values.iter().map(|v| v.retrieve()).collect(),
+                params: self.monty_params_ciphertext_modulus,
+                _marker: PhantomData,
+            },
             monty_params_ciphertext_modulus: self.monty_params_ciphertext_modulus,
             monty_params_big_ciphertext_modulus: self.monty_params_big_ciphertext_modulus,
         }

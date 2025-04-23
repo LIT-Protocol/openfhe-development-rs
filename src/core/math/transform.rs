@@ -18,15 +18,21 @@ pub mod number_theoretic_transform {
     use super::*;
     use crate::core::math::vec_mod::VecMod;
     use crate::core::utils::reverse_bits;
+    use crypto_bigint::modular::SafeGcdInverter;
     use crypto_bigint::{Concat, MulMod, Split};
 
-    pub fn forward_transform_iterative<const LIMBS: usize, const WIDE_LIMBS: usize>(
+    pub fn forward_transform_iterative<
+        const LIMBS: usize,
+        const WIDE_LIMBS: usize,
+        const UNSAT_LIMBS: usize,
+    >(
         input: &VecMod<LIMBS, WIDE_LIMBS>,
         root_of_unity_table: &VecMod<LIMBS, WIDE_LIMBS>,
     ) -> VecMod<LIMBS, WIDE_LIMBS>
     where
         Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>>,
         Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>>,
+        Odd<Uint<LIMBS>>: PrecomputeInverter<Inverter = SafeGcdInverter<LIMBS, UNSAT_LIMBS>>,
     {
         let mut output = VecMod::with_value_uint(input.len(), Uint::ZERO, *input.params.modulus());
         let n = input.len();
