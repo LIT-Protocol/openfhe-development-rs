@@ -6,6 +6,12 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::f64::consts::E;
 
+pub trait Sampler {
+    fn random_i64(&mut self) -> i64;
+    fn random_bit(&mut self) -> u16;
+}
+
+#[derive(Debug)]
 pub struct BaseSampler {
     b_a: f64,
     mean: f64,
@@ -21,6 +27,16 @@ pub struct BaseSampler {
     values: Vec<f64>,
 }
 
+impl Sampler for BaseSampler {
+    fn random_i64(&mut self) -> i64 {
+        self.random_i64()
+    }
+
+    fn random_bit(&mut self) -> u16 {
+        self.random_bit()
+    }
+}
+
 impl BaseSampler {
     pub fn new(
         mean: f64,
@@ -28,11 +44,39 @@ impl BaseSampler {
         bg: BitGenerator,
         base_sampler_type: BaseSamplerType,
     ) -> Self {
-        todo!()
+        const ACC: f64 = 1e-17;
+        let mut sampler = BaseSampler {
+            b_a: 0.0,
+            mean: if mean >= 0.0 {
+                mean.floor()
+            } else {
+                mean.ceil()
+            },
+            std_dev,
+            bit_generator: bg,
+            base_sampler_type,
+            fin: (std_dev * (-2.0 * ACC.ln()).sqrt()).ceil() as usize,
+            ddg_tree: vec![],
+            hamming_weights: vec![],
+            matrix_size: 0,
+            first_non_zero: -1,
+            end_index: -1,
+            values: vec![],
+        };
+        let mean = mean - sampler.mean * 1.0;
+        if base_sampler_type == BaseSamplerType::Peikert {
+            sampler.initialize(mean);
+        } else {
+            sampler.gen_prob_matrix(mean, std_dev);
+        }
+        sampler
     }
 
     pub fn random_i64(&mut self) -> i64 {
-        todo!()
+        match self.base_sampler_type {
+            BaseSamplerType::KnuthYao => self.gen_i64_knuth_yao(),
+            BaseSamplerType::Peikert => self.gen_i64_peikert(),
+        }
     }
 
     pub fn random_bit(&mut self) -> u16 {
