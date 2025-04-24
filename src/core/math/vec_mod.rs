@@ -1,5 +1,6 @@
 use crypto_bigint::modular::{MontyForm, MontyParams, SafeGcdInverter};
 use crypto_bigint::*;
+use rand::CryptoRng;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error as DError, MapAccess, SeqAccess, Visitor},
@@ -684,5 +685,20 @@ where
     pub fn switch_modulus(&mut self, modulus: Odd<Uint<LIMBS>>) {
         *self %= &modulus;
         self.params = MontyParams::new(modulus);
+    }
+
+    pub fn random(mut rng: impl CryptoRng, length: usize, modulus: Odd<Uint<LIMBS>>) -> Self {
+        let nz_modulus = modulus.as_nz_ref();
+        let mut values = Vec::with_capacity(length);
+        for _ in 0..length {
+            let value = Uint::<LIMBS>::random_mod(&mut rng, nz_modulus);
+            values.push(value);
+        }
+        let params = MontyParams::new(modulus);
+        Self {
+            values,
+            params,
+            _marker: PhantomData,
+        }
     }
 }

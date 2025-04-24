@@ -277,7 +277,15 @@ impl DiscreteGaussian {
         result
     }
 
-    pub fn gen_uint<const LIMBS: usize>(&mut self, modulus: &Odd<Uint<LIMBS>>) -> Uint<LIMBS> {
+    pub fn gen_uint<const LIMBS: usize, const WIDE_LIMBS: usize, const UNSAT_LIMBS: usize>(
+        &mut self,
+        modulus: &Odd<Uint<LIMBS>>,
+    ) -> Uint<LIMBS>
+    where
+        Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>>,
+        Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>>,
+        Odd<Uint<LIMBS>>: PrecomputeInverter<Inverter = SafeGcdInverter<LIMBS, UNSAT_LIMBS>>,
+    {
         let seed: f64 = self.rng.sample(Open01);
         let seed = seed - 0.5;
         let tmp = seed.abs() - self.normal.mean() / 2.0;
@@ -291,12 +299,21 @@ impl DiscreteGaussian {
         Uint::from(val as u64)
     }
 
-    pub fn gen_uint_with_params<const LIMBS: usize>(
+    pub fn gen_uint_with_params<
+        const LIMBS: usize,
+        const WIDE_LIMBS: usize,
+        const UNSAT_LIMBS: usize,
+    >(
         mean: f64,
         std_dev: f64,
         ring_dimension: usize,
         modulus: &Odd<Uint<LIMBS>>,
-    ) -> Uint<LIMBS> {
+    ) -> Uint<LIMBS>
+    where
+        Uint<LIMBS>: Concat<Output = Uint<WIDE_LIMBS>>,
+        Uint<WIDE_LIMBS>: Split<Output = Uint<LIMBS>>,
+        Odd<Uint<LIMBS>>: PrecomputeInverter<Inverter = SafeGcdInverter<LIMBS, UNSAT_LIMBS>>,
+    {
         let mut rng = StdRng::from_os_rng();
         let t = ring_dimension.ilog2() as f64 * std_dev;
         let uniform_int = Normal::<f64>::new((mean - t).floor(), (mean + t).ceil()).unwrap();
